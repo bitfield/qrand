@@ -1,16 +1,20 @@
 package qrand
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 var (
 	Reader     io.Reader
-	HTTPClient *http.Client
-	URL        string
+	HTTPClient *http.Client = &http.Client{
+		Timeout: 5 * time.Second,
+	}
+	URL string = "qrng.anu.edu.au"
 )
 
 type APIResponse struct {
@@ -39,6 +43,13 @@ func (r *APIResponse) UnmarshalJSON(input []byte) error {
 		return fmt.Errorf("want string data value, got %T: %v", data[0], data[0])
 	}
 	r.Data = []byte(value)
+	return nil
+}
+
+func Bytes(buf *bytes.Buffer, n int) error {
+	blocks := n/1024 + 1
+	size := n % 1024
+	HTTPClient.Get(fmt.Sprintf("%s/API/jsonI.php?length=%d&type=uint8&size=%d", URL, blocks, size))
 	return nil
 }
 

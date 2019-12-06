@@ -1,8 +1,11 @@
 package qrand_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"io/ioutil"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/bitfield/qrand"
@@ -33,6 +36,29 @@ import (
 // 	}
 // }
 
+func TestBytes(t *testing.T) {
+	called := false
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		wantURL := "/API/jsonI.php?length=1&type=uint8&size=8"
+		if !cmp.Equal(wantURL, r.URL.String()) {
+			t.Error(cmp.Diff(wantURL, r.URL.String()))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+	qrand.HTTPClient = ts.Client()
+	qrand.URL = ts.URL
+	var got bytes.Buffer
+	err := qrand.Bytes(&got, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Error("want API call, but got none")
+	}
+}
+
 type ZeroReader struct{}
 
 func (z ZeroReader) Read(b []byte) (n int, err error) {
@@ -55,7 +81,7 @@ func TestReadZeroReader(t *testing.T) {
 	}
 }
 
-func TestGetBytesFromJSON(t *testing.T) {
+func TestUnmarshalJSON(t *testing.T) {
 	jData, err := ioutil.ReadFile("testdata/response.json")
 	if err != nil {
 		t.Fatal(err)
