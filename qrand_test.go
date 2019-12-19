@@ -1,6 +1,7 @@
 package qrand_test
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"io/ioutil"
@@ -40,7 +41,7 @@ func TestBytes(t *testing.T) {
 	called := false
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
-		wantURL := "/API/jsonI.php?length=1&type=uint8&size=8"
+		wantURL := "/API/jsonI.php?length=3&type=uint8&size=1024"
 		if !cmp.Equal(wantURL, r.URL.String()) {
 			t.Error(cmp.Diff(wantURL, r.URL.String()))
 		}
@@ -50,7 +51,7 @@ func TestBytes(t *testing.T) {
 	qrand.HTTPClient = ts.Client()
 	qrand.URL = ts.URL
 	var got bytes.Buffer
-	err := qrand.Bytes(&got, 8)
+	err := qrand.Bytes(&got, 2049)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,5 +95,22 @@ func TestUnmarshalJSON(t *testing.T) {
 	}
 	if !cmp.Equal(got, want) {
 		t.Error(cmp.Diff(got, want))
+	}
+}
+
+func TestNoddyBuffer(t *testing.T) {
+	buf := bytes.NewBufferString("11111111")
+	reader := bufio.NewReader(buf)
+	got := make([]byte, 9)
+	qrand.Reader = reader
+	_, err := qrand.Read(got)
+	if err != nil {
+		t.Error(err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("want zero-length buffer, got %d", buf.Len())
+	}
+	if string(got) != "111111111" {
+		t.Errorf("want to read %s, got %s", "111111111", string(got))
 	}
 }

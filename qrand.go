@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const max = 1024 * 1024 // API limit
+
 var (
 	Reader     io.Reader
 	HTTPClient *http.Client = &http.Client{
@@ -16,6 +18,23 @@ var (
 	}
 	URL string = "qrng.anu.edu.au"
 )
+
+func Bytes(buf *bytes.Buffer, n int) error {
+	if n > max {
+		return fmt.Errorf("number of bytes must be less than %d (API limit): %d", max, n)
+	}
+	blocks := 1
+	size := n
+	if n > 1024 {
+		size = 1024
+		blocks = n / 1024
+		if n%1024 > 0 {
+			blocks++
+		}
+	}
+	HTTPClient.Get(fmt.Sprintf("%s/API/jsonI.php?length=%d&type=uint8&size=%d", URL, blocks, size))
+	return nil
+}
 
 type APIResponse struct {
 	Data []byte `json:"data"`
@@ -43,13 +62,6 @@ func (r *APIResponse) UnmarshalJSON(input []byte) error {
 		return fmt.Errorf("want string data value, got %T: %v", data[0], data[0])
 	}
 	r.Data = []byte(value)
-	return nil
-}
-
-func Bytes(buf *bytes.Buffer, n int) error {
-	blocks := n/1024 + 1
-	size := n % 1024
-	HTTPClient.Get(fmt.Sprintf("%s/API/jsonI.php?length=%d&type=uint8&size=%d", URL, blocks, size))
 	return nil
 }
 
