@@ -1,12 +1,12 @@
 package qrand_test
 
 import (
-	"bufio"
-	"bytes"
 	"encoding/json"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/bitfield/qrand"
@@ -41,44 +41,31 @@ func TestBytes(t *testing.T) {
 	called := false
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
-		wantURL := "/API/jsonI.php?length=3&type=uint8&size=1024"
+		wantURL := "/API/jsonI.php?length=1&type=uint8&size=12"
 		if !cmp.Equal(wantURL, r.URL.String()) {
 			t.Error(cmp.Diff(wantURL, r.URL.String()))
 		}
 		w.WriteHeader(http.StatusOK)
+		data, err := os.Open("testdata/response.json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer data.Close()
+		io.Copy(w, data)
 	}))
 	defer ts.Close()
 	qrand.HTTPClient = ts.Client()
 	qrand.URL = ts.URL
-	var got bytes.Buffer
-	err := qrand.Bytes(&got, 2049)
+	var got = make([]byte, 12)
+	bytesRead, err := qrand.Read(got)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if bytesRead != 12 {
+		t.Errorf("want 12 bytes read, got %d", bytesRead)
 	}
 	if !called {
 		t.Error("want API call, but got none")
-	}
-}
-
-type ZeroReader struct{}
-
-func (z ZeroReader) Read(b []byte) (n int, err error) {
-	for i := range b {
-		b[i] = 0
-	}
-	return len(b), nil
-}
-
-func TestReadZeroReader(t *testing.T) {
-	qrand.Reader = ZeroReader{}
-	const numBytes = 8
-	got := make([]byte, numBytes)
-	n, err := qrand.Read(got)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != numBytes {
-		t.Errorf("want %d bytes, got %d", numBytes, n)
 	}
 }
 
@@ -95,22 +82,5 @@ func TestUnmarshalJSON(t *testing.T) {
 	}
 	if !cmp.Equal(got, want) {
 		t.Error(cmp.Diff(got, want))
-	}
-}
-
-func TestNoddyBuffer(t *testing.T) {
-	buf := bytes.NewBufferString("11111111")
-	reader := bufio.NewReader(buf)
-	got := make([]byte, 9)
-	qrand.Reader = reader
-	_, err := qrand.Read(got)
-	if err != nil {
-		t.Error(err)
-	}
-	if buf.Len() != 0 {
-		t.Errorf("want zero-length buffer, got %d", buf.Len())
-	}
-	if string(got) != "111111111" {
-		t.Errorf("want to read %s, got %s", "111111111", string(got))
 	}
 }
