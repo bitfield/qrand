@@ -6,6 +6,7 @@ package qrand
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -14,20 +15,24 @@ import (
 
 const maxBytesPerRequest = 1024 // API limit
 
-var (
-	// HTTPClient is the `*http.Client` which will be used to make API
-	// requests. It has a 5-second timeout. To use a different timeout, set
-	// HTTPClient.Timeout. To use a different client, set HTTPClient.
-	HTTPClient *http.Client = &http.Client{
-		Timeout: 5 * time.Second,
-	}
-	// URL is the URL of the ANU QRNG API server. To use a different server (for example for testing), set the URL accordingly.
-	URL string = "https://qrng.anu.edu.au"
-)
+// HTTPClient is the `*http.Client` which will be used to make API
+// requests. It has a 5-second timeout. To use a different timeout, set
+// HTTPClient.Timeout. To use a different client, set HTTPClient.
+var HTTPClient *http.Client = &http.Client{
+	Timeout: 5 * time.Second,
+}
 
-// Read calls the ANU QRNG API to read enough bytes to fill 'buf'. It returns
-// the number of bytes actually read, or an error.
-func Read(buf []byte) (n int, err error) {
+// URL is the URL of the ANU QRNG API server. To use a different server
+// (for example for testing), set the URL accordingly.
+var URL string = "https://qrng.anu.edu.au"
+
+// Reader is a global, shared instance of a quantum random number generator,
+// analogous to crypto/rand's Reader (and a plug-in replacement for it).
+var Reader io.Reader = qReader{}
+
+type qReader struct{}
+
+func (q qReader) Read(buf []byte) (n int, err error) {
 	if len(buf) > maxBytesPerRequest {
 		return 0, fmt.Errorf("number of bytes must be less than %d (API limit): %d", maxBytesPerRequest, len(buf))
 	}
@@ -55,9 +60,15 @@ func Read(buf []byte) (n int, err error) {
 	return len(buf), nil
 }
 
+// Read calls the ANU QRNG API to read enough bytes to fill 'buf'. It returns
+// the number of bytes actually read, or an error.
+func Read(buf []byte) (n int, err error) {
+	return Reader.Read(buf)
+}
+
 // APIResponse represents a response from the ANU QRNG API.
 type APIResponse struct {
-	Data []byte `json:"data"`
+	Data []byte
 }
 
 // UnmarshalJSON reads the byte data in the raw API response into the

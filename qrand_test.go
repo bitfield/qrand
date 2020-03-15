@@ -14,6 +14,7 @@ import (
 )
 
 func TestBytes(t *testing.T) {
+	t.Parallel()
 	called := false
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
@@ -40,12 +41,16 @@ func TestBytes(t *testing.T) {
 	if bytesRead != 64 {
 		t.Errorf("want 64 bytes read, got %d", bytesRead)
 	}
+	if got[0] != 63 {
+		t.Errorf("first byte should be 63, but was %d", got[0])
+	}
 	if !called {
 		t.Error("want API call, but got none")
 	}
 }
 
 func TestUnmarshalJSON(t *testing.T) {
+	t.Parallel()
 	jData, err := ioutil.ReadFile("testdata/response.json")
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +61,34 @@ func TestUnmarshalJSON(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	if !cmp.Equal(got, want) {
-		t.Error(cmp.Diff(got, want))
+	if !cmp.Equal(want, got) {
+		t.Error(cmp.Diff(want, got))
+	}
+}
+
+type zeroReader struct{}
+
+func (z zeroReader) Read(b []byte) (int, error) {
+	copy(b, make([]byte, len(b)))
+
+	return len(b), nil
+}
+
+func TestReassignReader(t *testing.T) {
+	// not concurrency-safe, because we mess with global Reader
+	got := make([]byte, 3)
+	want := make([]byte, 3)
+	origReader := qrand.Reader
+	qrand.Reader = zeroReader{}
+	bytesRead, err := qrand.Read(got)
+	qrand.Reader = origReader
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytesRead != 3 {
+		t.Errorf("want 3 bytes read, got %d", bytesRead)
+	}
+	if !cmp.Equal(want, got) {
+		t.Error(cmp.Diff(want, got))
 	}
 }
