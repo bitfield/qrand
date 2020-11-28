@@ -4,10 +4,12 @@
 package qrand
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -64,6 +66,28 @@ func (q qReader) Read(buf []byte) (n int, err error) {
 // the number of bytes actually read, or an error.
 func Read(buf []byte) (n int, err error) {
 	return Reader.Read(buf)
+}
+
+// Source represents an alternative source that can also generate uniformly-distributed random values
+type source struct{}
+
+// Seed takes no argument because there is nothing to seed
+func (s *source) Seed(seed int64) {}
+
+// Uint64 returns a pseudo-random 64-bit value as a uint64 from Source
+func (s *source) Uint64() (value uint64) {
+	binary.Read(Reader, binary.BigEndian, &value)
+	return value
+}
+
+// Int63 returns a non-negative pseudo-random 63-bit integer as an int64 from Source
+func (s *source) Int63() (value int64) {
+	return int64(s.Uint64() & ^uint64(1<<63))
+}
+
+// NewSource returns a pointer to qrand Source
+func NewSource() rand.Source {
+	return &source{}
 }
 
 // APIResponse represents a response from the ANU QRNG API.
