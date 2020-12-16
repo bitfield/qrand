@@ -32,27 +32,31 @@ However, it's fun to use a source of randomness which is _entirely_ non-determin
 
 If you have an interesting application for `qrand`, [let me know!](mailto:john@bitfieldconsulting.com)
 
-# Using `qrand` in programs
+# Examples
 
-Let's look at the [example program](example/main.go) to see how to generate a sequence of random bytes:
+Here are a couple of example programs that show how you might use `qrand`.
+
+## Creating a randomness source
+
+The most common use for a randomness source is probably to generate random numbers by calling something like `rand.Intn`. The [password generator example](example/password/main.go) shows how this works with `qrand`. First, we create a new quantum randomness source by calling `qrand.NewSource()`. Then, we pass this source to `rand.New` to create a new random generator based on our source:
 
 ```go
-package main
+var random = rand.New(qrand.NewSource())
+```
 
-import (
-	"github.com/bitfield/qrand"
-	"fmt"
-	"log"
-)
+We can now call `Intn` (for example) on this generator, in the same way that we would on the default random generator:
 
-func main() {
-	numbers := make([]byte, 10)
-	_, err := qrand.Read(numbers)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Println(numbers)
-}
+```go
+offset := random.Intn(26)
+```
+
+## Reading random bytes
+
+Sometimes instead of a random generator, you just want to read a sequence of random bytes. The [`read_random` example](example/read_random/main.go) shows how to do this:
+
+```go
+numbers := make([]byte, 10)
+_, err := qrand.Read(numbers)
 ```
 
 As you can see, this is very similar to the [equivalent `crypto/rand` program](https://golang.org/pkg/crypto/rand/#example_Read). The only difference is using `qrand.Read` instead of `rand.Read`.

@@ -85,7 +85,7 @@ func (s *source) Int63() (value int64) {
 	return int64(s.Uint64() & ^uint64(1<<63))
 }
 
-// NewSource returns a pointer to a new qrand source
+// NewSource returns a pointer to a new qrand source.
 func NewSource() rand.Source {
 	return &source{}
 }
