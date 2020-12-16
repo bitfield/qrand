@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"io/ioutil"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -70,7 +71,6 @@ type zeroReader struct{}
 
 func (z zeroReader) Read(b []byte) (int, error) {
 	copy(b, make([]byte, len(b)))
-
 	return len(b), nil
 }
 
@@ -91,4 +91,20 @@ func TestReassignReader(t *testing.T) {
 	if !cmp.Equal(want, got) {
 		t.Error(cmp.Diff(want, got))
 	}
+}
+
+func TestNewSource(t *testing.T) {
+	// not concurrency-safe, because we mess with global Reader
+	origReader := qrand.Reader
+	qrand.Reader = zeroReader{}
+	source := qrand.NewSource()
+	if source == nil {
+		t.Fatal("want non-nil result from NewSource, got nil")
+	}
+	random := rand.New(source)
+	got := random.Intn(1000)
+	if got != 0 {
+		t.Errorf("want 0, got %d", got)
+	}
+	qrand.Reader = origReader
 }
