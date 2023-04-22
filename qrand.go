@@ -54,7 +54,7 @@ func (q qReader) Read(buf []byte) (n int, err error) {
 	if resp.StatusCode != http.StatusOK {
 		return 0, fmt.Errorf("unexpected response status %d: %q", resp.StatusCode, respString)
 	}
-	var r = APIResponse{}
+	r := APIResponse{}
 	if err = json.NewDecoder(resp.Body).Decode(&r); err != nil {
 		return 0, fmt.Errorf("decoding error for %q: %w", respString, err)
 	}
@@ -105,7 +105,7 @@ func (r *APIResponse) UnmarshalJSON(input []byte) error {
 	}
 	resp, ok := raw["data"]
 	if !ok {
-		return fmt.Errorf("No 'data' field found in response: %v", raw)
+		return fmt.Errorf("no 'data' field found in response: %v", raw)
 	}
 	data, ok := resp.([]interface{})
 	if !ok {
