@@ -16,10 +16,10 @@ func main() {
 		os.Exit(1)
 	}
 	q := qrand.NewReader(apiKey)
-	numbers := make([]byte, 10)
-	_, err := q.Read(numbers)
+	buf := make([]byte, 10)
+	_, err := q.Read(buf)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println(numbers)
+	fmt.Println(buf)
 }
