@@ -1,5 +1,6 @@
 # Based on https://github.com/mvdan/github-actions-golang
 on: [push, pull_request]
+
 name: Tests
 jobs:
   test:
@@ -22,3 +23,5 @@ jobs:
           go-version: 1.20.x
       - uses: actions/checkout@v3
       - run: go test -tags=integration ./...
+        env: 
+          AQN_API_KEY: ${{ secrets.AQN_API_KEY }}

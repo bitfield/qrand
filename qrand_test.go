@@ -2,8 +2,7 @@ package qrand_test
 
 import (
 	"encoding/json"
-	"io"
-	"io/ioutil"
+	"fmt"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -14,28 +13,28 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-func TestBytes(t *testing.T) {
+func TestReadMakesCorrectAPIRequestAndParsesResult(t *testing.T) {
 	t.Parallel()
 	called := false
+	wantAPIKey := "dummyKey"
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
-		wantURL := "/API/jsonI.php?length=64&type=uint8"
-		if !cmp.Equal(wantURL, r.URL.String()) {
-			t.Error(cmp.Diff(wantURL, r.URL.String()))
+		gotAPIKey := r.Header.Get("x-api-key")
+		if wantAPIKey != gotAPIKey {
+			t.Error("bad x-api-key header", cmp.Diff(wantAPIKey, gotAPIKey))
 		}
-		w.WriteHeader(http.StatusOK)
-		data, err := os.Open("testdata/response.json")
-		if err != nil {
-			t.Fatal(err)
+		wantURL := "/?length=64&type=uint8"
+		if wantURL != r.URL.String() {
+			t.Error("bad request URI", cmp.Diff(wantURL, r.URL.String()))
 		}
-		defer data.Close()
-		io.Copy(w, data)
+		http.ServeFile(w, r, "testdata/response.json")
 	}))
 	defer ts.Close()
-	qrand.HTTPClient = ts.Client()
-	qrand.URL = ts.URL
-	var got = make([]byte, 64)
-	bytesRead, err := qrand.Read(got)
+	q := qrand.NewReader(wantAPIKey)
+	q.HTTPClient = ts.Client()
+	q.BaseURL = ts.URL
+	got := make([]byte, 64)
+	bytesRead, err := q.Read(got)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,9 +49,64 @@ func TestBytes(t *testing.T) {
 	}
 }
 
-func TestUnmarshalJSON(t *testing.T) {
+func TestReadReturnsErrorsWhenExpected(t *testing.T) {
 	t.Parallel()
-	jData, err := ioutil.ReadFile("testdata/response.json")
+	q := qrand.NewReader("dummyKey")
+	_, err := q.Read(make([]byte, 1025))
+	if err == nil {
+		t.Fatal("want error when requested bytes exceeds API maximum")
+	}
+	q.BaseURL = string([]rune{0x7F}) // invalid character in URLs
+	_, err = q.Read([]byte{})
+	if err == nil {
+		t.Fatal("want error when base URL unparsable")
+	}
+	q.BaseURL = "invalid"
+	_, err = q.Read([]byte{})
+	if err == nil {
+		t.Fatal("want error when base URL unreachable")
+	}
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	q.HTTPClient = ts.Client()
+	q.BaseURL = ts.URL
+	_, err = q.Read([]byte{})
+	if err == nil {
+		t.Fatal("want error when API returns forbidden status")
+	}
+	ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "1") // causes unexpected EOF on read
+	}))
+	q.HTTPClient = ts.Client()
+	q.BaseURL = ts.URL
+	_, err = q.Read([]byte{})
+	if err == nil {
+		t.Fatal("want error when response body can't be read")
+	}
+	ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	q.HTTPClient = ts.Client()
+	q.BaseURL = ts.URL
+	_, err = q.Read([]byte{})
+	if err == nil {
+		t.Fatal("want error on unexpected HTTP response status")
+	}
+	ts = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "") // invalid JSON
+	}))
+	q.HTTPClient = ts.Client()
+	q.BaseURL = ts.URL
+	_, err = q.Read([]byte{})
+	if err == nil {
+		t.Fatal("want error on invalid JSON response")
+	}
+}
+
+func TestUnmarshalJSON_UnmarshalsValidData(t *testing.T) {
+	t.Parallel()
+	jData, err := os.ReadFile("testdata/response.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,44 +121,48 @@ func TestUnmarshalJSON(t *testing.T) {
 	}
 }
 
-type zeroReader struct{}
-
-func (z zeroReader) Read(b []byte) (int, error) {
-	copy(b, make([]byte, len(b)))
-	return len(b), nil
+func TestUnmarshalJSON_ReturnsErrorsWhenExpected(t *testing.T) {
+	t.Parallel()
+	r := qrand.APIResponse{}
+	err := r.UnmarshalJSON([]byte{})
+	if err == nil {
+		t.Fatal("want error for invalid JSON")
+	}
+	err = r.UnmarshalJSON([]byte(`{"nodata":"foryou"}`))
+	if err == nil {
+		t.Fatal("want error for missing 'data' field")
+	}
+	err = r.UnmarshalJSON([]byte(`{"data":1}`))
+	if err == nil {
+		t.Fatal("want error when 'data' is not an array")
+	}
+	err = r.UnmarshalJSON([]byte(`{"data":[]}`))
+	if err == nil {
+		t.Fatal("want error when 'data' has no elements")
+	}
+	err = r.UnmarshalJSON([]byte(`{"data":["not a number"]}`))
+	if err == nil {
+		t.Fatal("want error when 'data' has non-numeric element")
+	}
+	err = r.UnmarshalJSON([]byte(`{"data":[256]}`))
+	if err == nil {
+		t.Fatal("want error when 'data' element is too big for a byte")
+	}
 }
 
-func TestReassignReader(t *testing.T) {
-	// not concurrency-safe, because we mess with global Reader
-	got := make([]byte, 3)
-	want := make([]byte, 3)
-	origReader := qrand.Reader
-	qrand.Reader = zeroReader{}
-	bytesRead, err := qrand.Read(got)
-	qrand.Reader = origReader
-	if err != nil {
-		t.Fatal(err)
+func TestSourceReturnsExpectedResultFromIntn(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "testdata/response.json")
+	}))
+	defer ts.Close()
+	q := qrand.NewReader("dummyKey")
+	q.HTTPClient = ts.Client()
+	q.BaseURL = ts.URL
+	rnd := rand.New(qrand.NewSource(q))
+	want := 3
+	got := rnd.Intn(10)
+	if want != got {
+		t.Errorf("want %d, got %d", want, got)
 	}
-	if bytesRead != 3 {
-		t.Errorf("want 3 bytes read, got %d", bytesRead)
-	}
-	if !cmp.Equal(want, got) {
-		t.Error(cmp.Diff(want, got))
-	}
-}
-
-func TestNewSource(t *testing.T) {
-	// not concurrency-safe, because we mess with global Reader
-	origReader := qrand.Reader
-	qrand.Reader = zeroReader{}
-	source := qrand.NewSource()
-	if source == nil {
-		t.Fatal("want non-nil result from NewSource, got nil")
-	}
-	random := rand.New(source)
-	got := random.Intn(1000)
-	if got != 0 {
-		t.Errorf("want 0, got %d", got)
-	}
-	qrand.Reader = origReader
 }
