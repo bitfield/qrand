@@ -1,93 +1,102 @@
 // Package qrand provides random numbers using the hardware quantum random
 // number generator at the Australian National University (ANU). See
-// https://qrng.anu.edu.au/API/api-demo.php for details of the ANU QRNG API.
+// https://quantumnumbers.anu.edu.au/ for details of this API.
 package qrand
 
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"net/http"
-	"strings"
 	"time"
 )
 
-const maxBytesPerRequest = 1024 // API limit
-
-// HTTPClient is the `*http.Client` which will be used to make API
-// requests. It has a 5-second timeout. To use a different timeout, set
-// HTTPClient.Timeout. To use a different client, set HTTPClient.
-var HTTPClient *http.Client = &http.Client{
-	Timeout: 5 * time.Second,
+// A qReader represents a client for the AQN API.
+type qReader struct {
+	// BaseURL holds the 'SCHEME://HOST' part of the request URL. This can
+	// be overridden (for example, for testing against a local HTTP
+	// server).
+	BaseURL string
+	// HTTPClient holds the *[http.Client] that will be used for requests.
+	HTTPClient *http.Client
+	apiKey     string
 }
 
-// URL is the URL of the ANU QRNG API server. To use a different server
-// (for example for testing), set the URL accordingly.
-var URL string = "https://qrng.anu.edu.au"
+// NewReader creates and returns a qReader struct representing an AQN API
+// client.
+func NewReader(apiKey string) *qReader {
+	return &qReader{
+		BaseURL: "https://api.quantumnumbers.anu.edu.au",
+		apiKey:  apiKey,
+		HTTPClient: &http.Client{
+			Timeout: 5 * time.Second,
+		},
+	}
+}
 
-// Reader is a global, shared instance of a quantum random number generator,
-// analogous to crypto/rand's Reader (and a plug-in replacement for it).
-var Reader io.Reader = qReader{}
-
-type qReader struct{}
-
+// Read attempts to read enough random data from the API to fill buf, returning
+// the number of bytes successfully read, along with any error.
 func (q qReader) Read(buf []byte) (n int, err error) {
-	if len(buf) > maxBytesPerRequest {
-		return 0, fmt.Errorf("number of bytes must be less than %d (API limit): %d", maxBytesPerRequest, len(buf))
+	if len(buf) > 1024 {
+		return 0, fmt.Errorf("number of bytes must be less than 1024 (API limit): %d", len(buf))
 	}
 	size := len(buf)
-	resp, err := HTTPClient.Get(fmt.Sprintf("%s/API/jsonI.php?length=%d&type=uint8", URL, size))
+	URL := fmt.Sprintf("%s?length=%d&type=uint8", q.BaseURL, size)
+	req, err := http.NewRequest(http.MethodGet, URL, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("x-api-key", q.apiKey)
+	resp, err := q.HTTPClient.Do(req)
 	if err != nil {
 		return 0, err
 	}
 	defer resp.Body.Close()
-	respBytes, err := ioutil.ReadAll(resp.Body)
+	if resp.StatusCode == http.StatusForbidden {
+		return 0, errors.New("unauthorised: check your API key is valid")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("unexpected response status %q", resp.Status)
+	}
+	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return 0, fmt.Errorf("reading response body: %w", err)
 	}
-	resp.Body.Close()
-	respString := string(respBytes)
-	resp.Body = ioutil.NopCloser(strings.NewReader(respString))
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("unexpected response status %d: %q", resp.StatusCode, respString)
-	}
 	r := APIResponse{}
-	if err = json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return 0, fmt.Errorf("decoding error for %q: %w", respString, err)
+	err = json.Unmarshal(data, &r)
+	if err != nil {
+		return 0, fmt.Errorf("invalid response: %w", err)
 	}
-	copy(buf, r.Data)
-	return len(buf), nil
-}
-
-// Read calls the ANU QRNG API to read enough bytes to fill 'buf'. It returns
-// the number of bytes actually read, or an error.
-func Read(buf []byte) (n int, err error) {
-	return Reader.Read(buf)
+	return copy(buf, r.Data), nil
 }
 
 // Source is a randomness source which implements rand.Source.
-type source struct{}
+type source struct {
+	Reader io.Reader
+}
 
-// Seed takes no argument because there is nothing to seed.
+// Seed is a no-op, because a qrand source doesn't need seeding.
 func (s *source) Seed(seed int64) {}
 
-// Uint64 returns a random 64-bit value as a uint64 from Source.
+// Uint64 returns a random 64-bit value as a uint64.
 func (s *source) Uint64() (value uint64) {
-	binary.Read(Reader, binary.BigEndian, &value)
+	binary.Read(s.Reader, binary.BigEndian, &value)
 	return value
 }
 
-// Int63 returns a non-negative 63-bit integer as an int64 from Source.
+// Int63 returns a non-negative 63-bit integer as an int64.
 func (s *source) Int63() (value int64) {
 	return int64(s.Uint64() & ^uint64(1<<63))
 }
 
-// NewSource returns a pointer to a new qrand source.
-func NewSource() rand.Source {
-	return &source{}
+// NewSource creates a [rand.Source] using q as the reader.
+func NewSource(q *qReader) rand.Source {
+	return &source{
+		Reader: q,
+	}
 }
 
 // APIResponse represents a response from the ANU QRNG API.
